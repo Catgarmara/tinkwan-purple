@@ -112,7 +112,7 @@ log: Starting process HTTP
   <order>error_code</order>
 </decoder>
 
-REAL DEBUGGING SCENARIO: July 2025
+# REAL DEBUGGING SCENARIO: July 2025
 
 Problem: Custom decoder matched correctly in wazuh-logtest, but alerts didn’t show in Kibana Discover
 Cause: The decoder was capturing timestamp in a format that was not ISO8601
