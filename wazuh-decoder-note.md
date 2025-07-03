@@ -75,6 +75,8 @@ syntax error: use validator online https://www.xmlvalidation.com/
 ```
 
 ## Parent-child decoders
+
+log: Starting process HTTP
 <decoder name="parent">
   <prematch>Starting process</prematch>
 </decoder>
@@ -110,9 +112,121 @@ syntax error: use validator online https://www.xmlvalidation.com/
   <order>error_code</order>
 </decoder>
 
+REAL DEBUGGING SCENARIO: July 2025
 
+Problem: Custom decoder matched correctly in wazuh-logtest, but alerts didn’t show in Kibana Discover
+Cause: The decoder was capturing timestamp in a format that was not ISO8601
+Result: Alert was generated and indexed, but not visible in Discover (time-range broken)
+Fix: Remove timestamp capture from decoder regex. Let Wazuh auto-assign timestamp.
+✅ After that, alerts showed up properly in Kibana
 
+<!-- Bad (timestamp captured in wrong format) -->
+<regex>^(\S+) - - \[(\S+)...
+<order>srcip, timestamp,...</order>
 
+<!-- Good (no timestamp capture) -->
+<regex>^(\S+) - - \[\S+... <!-- timestamp is there but not captured -->
+<order>srcip, ...</order>
+
+Lesson: Only capture timestamps if you're sure your regex matches a standard format like 2025-07-01T14:00:00Z. Otherwise, skip capturing — Wazuh will use log ingestion time.
+
+---
+
+# Wazuh Custom NGINX Access Log Decoder Notes
+
+## Goal
+To build a custom decoder chain for NGINX access logs that includes:
+- Full user-agent string
+- Request URI
+- Status code
+- Response size
+- Optional timestamp (ISO 8601 if captured)
+- Prevent fallback to default `web-accesslog`
+
+## Environment
+- Wazuh Manager: Dockerized (4.7+)
+- Filebeat: Internal to Wazuh container
+- Logs ingested via `filebeat.modules: wazuh.alerts`
+
+## Key Problem
+Default decoder `0375-web-accesslog_decoders.xml` fails to extract sufficient fields like browser or full URL path. It also truncates complex logs. Custom decoder is needed.
+
+## Steps Taken
+
+### 1. Disabled Default Decoder
+```xml
+<ruleset>
+  <decoder_exclude>ruleset/decoders/0375-web-accesslog_decoders.xml</decoder_exclude>
+</ruleset>
+```
+
+### 2. Created Custom Decoder File
+Placed in:
+```
+/var/ossec/etc/decoders/0375-web-accesslog_decoders.xml
+```
+
+### 3. Decoder Chain
+```xml
+<decoder name="web-accesslog-test">
+  <type>web-log</type>
+  <program_name>nginx|apache</program_name>
+</decoder>
+
+<decoder name="web-accesslog-test">
+  <type>web-log</type>
+  <prematch>^\S+ \S+ \S+ \[.*\] \"\w+ \S+ HTTP/\S+\" </prematch>
+</decoder>
+
+<decoder name="web-accesslog-domain-test">
+  <type>web-log</type>
+  <parent>web-accesslog-test</parent>
+  <regex>^(\S+) \S+ \S+ \[.*\] "(\w+) (\S+) HTTP/(\S+)" (\d+) (\S+) "(.*?)" "(.*?)".*</regex>
+  <order>srcip, protocol, url, http_version, id, rsize, rcode, browser</order>
+</decoder>
+```
+
+### 4. Regex Debug Notes
+- Wazuh **does not require escaping square brackets** in `regex` or `prematch`.
+- Use `\[` only in contexts where regex expects literal matching via POSIX.
+- **Do not try to capture timestamps** unless formatted in ISO 8601 (`YYYY-MM-DDTHH:MM:SSZ`) or explicitly normalized.
+
+### 5. Common Pitfalls
+- Capturing timestamps in `DD/Mon/YYYY:HH:MM:SS +ZZZZ` format breaks Discover index.
+- Kibana Discover tab **requires a valid `@timestamp`**.
+- Wazuh can insert it automatically if not captured — safest default.
+- Regex syntax error in any `<regex>` will silently fall back to parent decoder.
+
+### 6. Test Method
+Used `wazuh-logtest`:
+```bash
+/var/ossec/bin/wazuh-logtest
+```
+
+Sample log:
+```
+81.179.122.118 - - [03/Jul/2025:10:32:00 +0000] "GET /please-work HTTP/1.1" 404 10 "-" "Mozilla/5.0..."
+```
+
+Confirmed fields:
+- srcip
+- protocol
+- url
+- http_version
+- id (status code)
+- rsize
+- rcode (referrer placeholder)
+- browser
+
+### 7. Result
+Decoder chain is working. Logs are parsed. Alerts trigger rule `31101`. Alerts visible in Kibana Discover after removing timestamp capture.
+
+---
+
+To improve further, implement:
+- Sigma rules mapping
+- Rule pack for URI + browser-based threat detection
+- Extended GeoIP field tagging
 
 
 
