@@ -2,8 +2,18 @@ import requests
 import datetime
 import csv
 import os
-import requests, datetime, csv, os, urllib3
+import urllib3
+
+# Disable SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+export WAZUH_API="https://your-wazuh-api"
+export WAZUH_USER="youruser"
+export WAZUH_PASS="yourpass"
+export SLACK_TOKEN="xoxb-xxx"
+export SLACK_CHANNEL="#your-channel"
+export VERIFY_TLS="false"
+python3 wazuh_report_slack.py
 
 # Wazuh API Configuration
 WAZUH_API = "https://20.2.200.176:55000"
