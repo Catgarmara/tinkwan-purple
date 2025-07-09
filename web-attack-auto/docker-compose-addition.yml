@@ -1,0 +1,24 @@
+  # Add this service to your existing Wazuh docker-compose.yml
+  wazuh-report-automation:
+    build:
+      context: ./automation
+      dockerfile: Dockerfile
+    container_name: wazuh-report-automation
+    environment:
+      - WAZUH_API_URL=https://wazuh.manager:55000
+      - WAZUH_USERNAME=wazuh
+      - WAZUH_PASSWORD=${WAZUH_PASSWORD}
+      - OPENSEARCH_URL=https://wazuh.indexer:9200
+      - OPENSEARCH_USERNAME=admin
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_CHANNEL=#security-alerts
+      - REPORT_TITLE=wazuh_daily_alerts
+    depends_on:
+      - wazuh.manager
+      - wazuh.indexer
+    networks:
+      - wazuh
+    volumes:
+      - ./automation/logs:/var/log
+    restart: unless-stopped
