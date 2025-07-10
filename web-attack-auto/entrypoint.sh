@@ -12,7 +12,7 @@ echo "Monitoring log file: /var/log/wazuh_automation.log"
 # Test run option
 if [ "$1" = "test" ]; then
     echo "Running test execution..."
-    python3 wazuh_slack_automation.py
+    python3 wazuh_dashboard_reporter.py
     exit 0
 fi
 
