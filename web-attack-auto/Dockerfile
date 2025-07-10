@@ -14,15 +14,15 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the automation script
-COPY wazuh_slack_automation.py .
+COPY wazuh_dashboard_reporter.py .
 COPY entrypoint.sh .
 
 # Make scripts executable
 RUN chmod +x entrypoint.sh
-RUN chmod +x wazuh_slack_automation.py
+RUN chmod +x wazuh_dashboard_reporter.py
 
 # Create cron job file
-RUN echo "0 0 * * * cd /app && python3 wazuh_slack_automation.py >> /var/log/wazuh_automation.log 2>&1" > /etc/cron.d/wazuh-report
+RUN echo "0 0 * * * cd /app && python3 wazuh_dashboard_reporter.py >> /var/log/wazuh_automation.log 2>&1" > /etc/cron.d/wazuh-report
 RUN chmod 0644 /etc/cron.d/wazuh-report
 RUN crontab /etc/cron.d/wazuh-report
 
