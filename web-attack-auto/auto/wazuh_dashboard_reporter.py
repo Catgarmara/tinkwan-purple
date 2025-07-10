@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Wazuh Dashboard Reporting API Automation
-This script uses the OpenSearch Dashboard Reporting API to generate and download CSV reports
-"""
+
 import requests
 import json
 import os
@@ -25,7 +22,7 @@ class WazuhDashboardReporter:
 
     def authenticate_dashboard(self):
         """Authenticate with Wazuh Dashboard"""
-        login_url = f"{self.dashboard_url}/auth/login"
+        login_url = f"{self.dashboard_url}/app/login"
 
         # Get login page to get CSRF token
         try:
@@ -62,7 +59,7 @@ class WazuhDashboardReporter:
                 "report_source": "Saved search",
                 "description": f"Automated daily report for {yesterday.strftime('%Y-%m-%d')}",
                 "core_params": {
-                    "base_url": f"{self.dashboard_url}/app/discover#/view/{self.saved_search_id}",
+                    "base_url": f"/app/discover#/view/{self.saved_search_id}",
                     "report_format": "csv",
                     "time_duration": "PT24H",
                     "origin": "Dashboard"
