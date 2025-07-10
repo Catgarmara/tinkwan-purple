@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+touch /var/log/wazuh_automation.log
+
 # Start cron daemon
 service cron start
 
