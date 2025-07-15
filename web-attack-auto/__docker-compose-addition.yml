@@ -2,7 +2,7 @@
   wazuh-report-automation:
     build:
       context: ./automation
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dashboard
     container_name: wazuh-report-automation
     environment:
       - WAZUH_API_URL=https://wazuh.manager:55000
