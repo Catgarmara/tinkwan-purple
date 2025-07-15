@@ -12,7 +12,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[logging.StreamHandler()]
 )
@@ -59,30 +59,33 @@ class WazuhDashboardReporter:
         yesterday = datetime.datetime.now() - datetime.timedelta(days=1)
 
         report_def = {
-            "report_params": {
-                "report_name": f"Daily_Wazuh_Report_{yesterday.strftime('%Y%m%d')}",
-                "report_source": "Saved search",
+            "reportParams": {
+                "reportName": f"Daily_Wazuh_Report_{yesterday.strftime('%Y%m%d')}",
+                "reportSource": "Saved search",
                 "description": f"Automated daily report for {yesterday.strftime('%Y-%m-%d')}",
-                "core_params": {
-                    "base_url": f"/app/discover#/view/{self.saved_search_id}",
-                    "saved_search_id": self.saved_search_id,
-                    "report_format": "csv",
-                    "time_duration": "PT24H",
+                "coreParams": {
+                    "baseUrl": f"/app/discover#/view/{self.saved_search_id}",
+                    "savedSearchId": self.saved_search_id,
+                    "reportFormat": "csv",
+                    "timeDuration": "PT24H",
                     "origin": "Dashboard"
                 }
             },
             "delivery": {
-                "delivery_type": "Download",
-                "delivery_params": {},
-                "configIds": [] ,
-                "title": f"Daily Wazuh Report - {yesterday.strftime('%Y-%m-%d')}"
+                "deliveryType": "Download",
+                "deliveryParams": {},
+                "configIds": [],
+                "title": f"Daily Wazuh Report - {yesterday.strftime('%Y-%m-%d')}",
+                "textDescription": "Daily web attack reports from dashboard",
+                "htmlDescription": "<p>Automated daily download of Wazuh alerts</p>"
             },
             "trigger": {
-                "trigger_type": "On demand"
+                "triggerType": "On demand"
             }
         }
 
         try:
+            logging.debug("Report definition payload:\n", json.dumps(report_def, indent=2))
             response = self.session.post(
                 f"{self.dashboard_url}/api/reporting/reportDefinition",
                 json=report_def,
