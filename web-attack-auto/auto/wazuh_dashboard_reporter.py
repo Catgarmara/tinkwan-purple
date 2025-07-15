@@ -73,7 +73,8 @@ class WazuhDashboardReporter:
             },
             "delivery": {
                 "delivery_type": "Download",
-                "delivery_params": {}
+                "delivery_params": {},
+                "configIds": []  
             },
             "trigger": {
                 "trigger_type": "On demand"
