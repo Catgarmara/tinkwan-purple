@@ -59,28 +59,28 @@ class WazuhDashboardReporter:
         yesterday = datetime.datetime.now() - datetime.timedelta(days=1)
 
         report_def = {
-            "reportParams": {
-                "reportName": f"Daily_Wazuh_Report_{yesterday.strftime('%Y%m%d')}",
-                "reportSource": "Saved search",
+            "report_params": {
+                "report_name": f"Daily_Wazuh_Report_{yesterday.strftime('%Y%m%d')}",
+                "report_source": "Saved search",
                 "description": f"Automated daily report for {yesterday.strftime('%Y-%m-%d')}",
-                "coreParams": {
-                    "baseUrl": f"/app/discover#/view/{self.saved_search_id}",
-                    "savedSearchId": self.saved_search_id,
-                    "reportFormat": "csv",
-                    "timeDuration": "PT24H",
+                "core_params": {
+                    "base_url": f"/app/discover#/view/{self.saved_search_id}",
+                    "saved_search_id": self.saved_search_id,
+                    "report_format": "csv",
+                    "time_duration": "PT24H",
                     "origin": "Dashboard"
                 }
             },
             "delivery": {
-                "deliveryType": "Download",
-                "deliveryParams": {},
-                "configIds": [],
+                "delivery_type": "Download",
+                "delivery_params": {},
+                "config_ids": [],
                 "title": f"Daily Wazuh Report - {yesterday.strftime('%Y-%m-%d')}",
-                "textDescription": "Daily web attack reports from dashboard",
-                "htmlDescription": "<p>Automated daily download of Wazuh alerts</p>"
+                "text_description": "Daily web attack reports from dashboard",
+                "html_description": "<p>Automated daily download of Wazuh alerts</p>"
             },
             "trigger": {
-                "triggerType": "On demand"
+                "trigger_type": "On demand"
             }
         }
 
