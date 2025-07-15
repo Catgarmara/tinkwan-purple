@@ -5,9 +5,17 @@ import json
 import os
 import time
 import datetime
+import logging
 from base64 import b64encode
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.StreamHandler()]
+)
 
 class WazuhDashboardReporter:
     def __init__(self, config):
@@ -24,11 +32,9 @@ class WazuhDashboardReporter:
         """Authenticate with Wazuh Dashboard"""
         login_url = f"{self.dashboard_url}/app/login"
 
-        # Get login page to get CSRF token
         try:
             response = self.session.get(f"{self.dashboard_url}/login")
 
-            # Try basic auth for OpenSearch Dashboard
             auth_header = b64encode(f"{self.username}:{self.password}".encode()).decode()
             self.session.headers.update({
                 'Authorization': f'Basic {auth_header}',
@@ -36,17 +42,16 @@ class WazuhDashboardReporter:
                 'osd-xsrf': 'true'
             })
 
-            # Test authentication
             health_response = self.session.get(f"{self.dashboard_url}/api/status")
             if health_response.status_code == 200:
-                print("Successfully authenticated with Wazuh Dashboard")
+                logging.info("Successfully authenticated with Wazuh Dashboard")
                 return True
             else:
-                print(f"Authentication failed: {health_response.status_code}")
+                logging.error(f"Authentication failed: {health_response.status_code}")
                 return False
 
         except requests.exceptions.RequestException as e:
-            print(f"Error authenticating with dashboard: {e}")
+            logging.error(f"Error authenticating with dashboard: {e}")
             return False
 
     def create_report_definition(self):
@@ -60,6 +65,7 @@ class WazuhDashboardReporter:
                 "description": f"Automated daily report for {yesterday.strftime('%Y-%m-%d')}",
                 "core_params": {
                     "base_url": f"/app/discover#/view/{self.saved_search_id}",
+                    "saved_search_id": self.saved_search_id,
                     "report_format": "csv",
                     "time_duration": "PT24H",
                     "origin": "Dashboard"
@@ -84,14 +90,14 @@ class WazuhDashboardReporter:
             if response.status_code in [200, 201]:
                 result = response.json()
                 report_definition_id = result.get('reportDefinitionId')
-                print(f"Created report definition: {report_definition_id}")
+                logging.info(f"Created report definition: {report_definition_id}")
                 return report_definition_id
             else:
-                print(f"Failed to create report definition: {response.status_code} - {response.text}")
+                logging.error(f"Failed to create report definition: {response.status_code} - {response.text}")
                 return None
 
         except requests.exceptions.RequestException as e:
-            print(f"Error creating report definition: {e}")
+            logging.error(f"Error creating report definition: {e}")
             return None
 
     def generate_report(self, report_definition_id):
@@ -105,14 +111,14 @@ class WazuhDashboardReporter:
             if response.status_code in [200, 201]:
                 result = response.json()
                 report_instance_id = result.get('reportInstanceId')
-                print(f"Started report generation: {report_instance_id}")
+                logging.info(f"Started report generation: {report_instance_id}")
                 return report_instance_id
             else:
-                print(f"Failed to generate report: {response.status_code} - {response.text}")
+                logging.error(f"Failed to generate report: {response.status_code} - {response.text}")
                 return None
 
         except requests.exceptions.RequestException as e:
-            print(f"Error generating report: {e}")
+            logging.error(f"Error generating report: {e}")
             return None
 
     def wait_for_report_completion(self, report_instance_id, max_wait=300):
@@ -129,26 +135,25 @@ class WazuhDashboardReporter:
                     result = response.json()
                     status = result.get('state')
 
-                    print(f"Report status: {status}")
+                    logging.debug(f"Report status: {status}")
 
                     if status == 'Success':
-                        print("Report generation completed successfully")
+                        logging.info("Report generation completed successfully")
                         return True
                     elif status in ['Failed', 'Error']:
-                        print(f"Report generation failed with status: {status}")
+                        logging.error(f"Report generation failed with status: {status}")
                         return False
 
-                    # Wait before checking again
                     time.sleep(10)
                 else:
-                    print(f"Error checking report status: {response.status_code}")
+                    logging.error(f"Error checking report status: {response.status_code}")
                     time.sleep(10)
 
             except requests.exceptions.RequestException as e:
-                print(f"Error checking report status: {e}")
+                logging.error(f"Error checking report status: {e}")
                 time.sleep(10)
 
-        print("Report generation timed out")
+        logging.error("Report generation timed out")
         return False
 
     def download_report(self, report_instance_id):
@@ -161,7 +166,6 @@ class WazuhDashboardReporter:
             if response.status_code == 200:
                 result = response.json()
 
-                # Get download URL or file content
                 if 'url' in result:
                     download_url = result['url']
                     download_response = self.session.get(f"{self.dashboard_url}{download_url}")
@@ -170,7 +174,7 @@ class WazuhDashboardReporter:
                         f"{self.dashboard_url}/api/reporting/reportInstance/download/{report_instance_id}"
                     )
                 else:
-                    print("No download URL or file data found in response")
+                    logging.error("No download URL or file data found in response")
                     return None
 
                 if download_response.status_code == 200:
@@ -179,23 +183,23 @@ class WazuhDashboardReporter:
                     with open(filename, 'wb') as f:
                         f.write(download_response.content)
 
-                    print(f"Downloaded report: {filename}")
+                    logging.info(f"Downloaded report: {filename}")
                     return filename
                 else:
-                    print(f"Failed to download report: {download_response.status_code}")
+                    logging.error(f"Failed to download report: {download_response.status_code}")
                     return None
             else:
-                print(f"Failed to get report info: {response.status_code}")
+                logging.error(f"Failed to get report info: {response.status_code}")
                 return None
 
         except requests.exceptions.RequestException as e:
-            print(f"Error downloading report: {e}")
+            logging.error(f"Error downloading report: {e}")
             return None
 
     def send_to_slack(self, filename):
         """Send CSV file to Slack channel"""
         if not os.path.exists(filename):
-            print(f"File {filename} not found")
+            logging.error(f"File {filename} not found")
             return False
 
         url = "https://slack.com/api/files.upload"
@@ -216,14 +220,14 @@ class WazuhDashboardReporter:
 
                 result = response.json()
                 if result.get('ok'):
-                    print(f"Successfully sent {filename} to Slack channel {self.slack_channel}")
+                    logging.info(f"Successfully sent {filename} to Slack channel {self.slack_channel}")
                     return True
                 else:
-                    print(f"Slack API error: {result.get('error', 'Unknown error')}")
+                    logging.error(f"Slack API error: {result.get('error', 'Unknown error')}")
                     return False
 
             except requests.exceptions.RequestException as e:
-                print(f"Error sending file to Slack: {e}")
+                logging.error(f"Error sending file to Slack: {e}")
                 return False
 
     def cleanup_file(self, filename):
@@ -231,49 +235,43 @@ class WazuhDashboardReporter:
         try:
             if os.path.exists(filename):
                 os.remove(filename)
-                print(f"Cleaned up file: {filename}")
+                logging.info(f"Cleaned up file: {filename}")
         except OSError as e:
-            print(f"Error cleaning up file {filename}: {e}")
+            logging.error(f"Error cleaning up file {filename}: {e}")
 
     def run_automated_report(self):
         """Main method to run the automated reporting process"""
-        print(f"Starting Wazuh Dashboard automated reporting at {datetime.datetime.now()}")
+        logging.info(f"Starting Wazuh Dashboard automated reporting at {datetime.datetime.now()}")
 
-        # Authenticate
         if not self.authenticate_dashboard():
-            print("Authentication failed, aborting")
+            logging.error("Authentication failed, aborting")
             return False
 
-        # Create report definition
         report_def_id = self.create_report_definition()
         if not report_def_id:
-            print("Failed to create report definition")
+            logging.error("Failed to create report definition")
             return False
 
-        # Generate report
         report_instance_id = self.generate_report(report_def_id)
         if not report_instance_id:
-            print("Failed to generate report")
+            logging.error("Failed to generate report")
             return False
 
-        # Wait for completion
         if not self.wait_for_report_completion(report_instance_id):
-            print("Report generation failed or timed out")
+            logging.error("Report generation failed or timed out")
             return False
 
-        # Download report
         filename = self.download_report(report_instance_id)
         if not filename:
-            print("Failed to download report")
+            logging.error("Failed to download report")
             return False
 
-        # Send to Slack
         if self.send_to_slack(filename):
-            print("Report successfully sent to Slack")
+            logging.info("Report successfully sent to Slack")
             self.cleanup_file(filename)
             return True
         else:
-            print("Failed to send report to Slack")
+            logging.error("Failed to send report to Slack")
             return False
 
 # Configuration
@@ -287,25 +285,23 @@ if __name__ == "__main__":
         'saved_search_id': os.getenv('SAVED_SEARCH_ID', '')
     }
 
-    # Validate required configuration
     required_fields = ['password', 'slack_token', 'saved_search_id']
     missing_fields = [field for field in required_fields if not config.get(field)]
 
     if missing_fields:
-        print(f"Missing required configuration: {', '.join(missing_fields)}")
-        print("Required environment variables:")
-        print("- WAZUH_DASHBOARD_PASSWORD")
-        print("- SLACK_BOT_TOKEN") 
-        print("- SAVED_SEARCH_ID")
+        logging.error(f"Missing required configuration: {', '.join(missing_fields)}")
+        logging.error("Required environment variables:")
+        logging.error("- WAZUH_DASHBOARD_PASSWORD")
+        logging.error("- SLACK_BOT_TOKEN")
+        logging.error("- SAVED_SEARCH_ID")
         exit(1)
 
-    # Run the automation
     reporter = WazuhDashboardReporter(config)
     success = reporter.run_automated_report()
 
     if success:
-        print("Automated reporting completed successfully")
+        logging.info("Automated reporting completed successfully")
         exit(0)
     else:
-        print("Automated reporting failed")
+        logging.error("Automated reporting failed")
         exit(1)
