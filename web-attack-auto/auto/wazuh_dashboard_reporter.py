@@ -74,7 +74,8 @@ class WazuhDashboardReporter:
             "delivery": {
                 "delivery_type": "Download",
                 "delivery_params": {},
-                "configIds": []  
+                "configIds": [] ,
+                "title": f"Daily Wazuh Report - {yesterday.strftime('%Y-%m-%d')}"
             },
             "trigger": {
                 "trigger_type": "On demand"
