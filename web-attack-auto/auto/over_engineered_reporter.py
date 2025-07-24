@@ -2505,60 +2505,133 @@ class WazuhReportAutomator:
             print(error_msg)
             return False
 
-        # Prepare Slack upload
-        url = "https://slack.com/api/files.upload"
+        # Modern Slack Upload using new API (files.getUploadURLExternal + files.completeUploadExternal)
         report_date = datetime.datetime.now().strftime('%Y-%m-%d')
         
-        logger.info(f"Preparing Slack upload to: {url}")
-        logger.info(f"Upload parameters:")
-        logger.info(f"  - Channel: {self.slack_channel}")
-        logger.info(f"  - Filename: {os.path.basename(filename)}")
-        logger.info(f"  - Report date: {report_date}")
-
+        logger.info("=" * 60)
+        logger.info("INITIATING MODERN SLACK FILE UPLOAD PROCESS")
+        logger.info("=" * 60)
+        logger.info("Using new Slack API: files.getUploadURLExternal + files.completeUploadExternal")
+        logger.info(f"Target channel: {self.slack_channel}")
+        logger.info(f"File to upload: {os.path.basename(filename)}")
+        logger.info(f"Report date: {report_date}")
+        
         try:
+            # Step 1: Get upload URL from Slack
+            logger.info("STEP 1: Requesting upload URL from Slack API")
+            
+            get_url_endpoint = "https://slack.com/api/files.getUploadURLExternal"
+            file_size = os.path.getsize(filename)
+            
+            url_request_data = {
+                'filename': os.path.basename(filename),
+                'length': file_size
+            }
+            
+            headers = {
+                'Authorization': f'Bearer {self.slack_token}',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+            
+            logger.info(f"Requesting upload URL for file: {os.path.basename(filename)} ({file_size} bytes)")
+            logger.debug(f"URL request endpoint: {get_url_endpoint}")
+            logger.debug(f"URL request data: {url_request_data}")
+            
+            url_response = requests.post(get_url_endpoint, data=url_request_data, headers=headers, timeout=30)
+            url_response.raise_for_status()
+            
+            url_result = url_response.json()
+            logger.debug(f"Upload URL response: {url_result}")
+            
+            if not url_result.get('ok'):
+                error_msg = url_result.get('error', 'Unknown error getting upload URL')
+                logger.error(f"Failed to get upload URL: {error_msg}")
+                logger.error(f"Full response: {url_result}")
+                print(f"Error getting Slack upload URL: {error_msg}")
+                return False
+            
+            upload_url = url_result['upload_url']
+            file_id = url_result['file_id']
+            
+            logger.info(f"✅ Upload URL obtained successfully")
+            logger.info(f"File ID: {file_id}")
+            logger.debug(f"Upload URL: {upload_url}")
+            
+            # Step 2: Upload file to the provided URL
+            logger.info("STEP 2: Uploading file to Slack storage")
+            
             with open(filename, 'rb') as file:
-                files = {'file': file}
-                data = {
-                    'token': self.slack_token,
-                    'channels': self.slack_channel,
-                    'filename': os.path.basename(filename),  # Use just the filename, not full path
-                    'title': f"Daily Wazuh Alert Report - {report_date}",
-                    'initial_comment': f"📊 Daily security alert report generated from Wazuh\n📅 Report Date: {report_date}\n📁 File: {os.path.basename(filename)}"
-                }
-
-                logger.info("Sending file upload request to Slack API")
-                logger.debug(f"Request data: channels={data['channels']}, filename={data['filename']}")
+                file_data = file.read()
                 
-                response = requests.post(url, files=files, data=data, timeout=60)
+            upload_headers = {
+                'Content-Type': 'application/octet-stream'
+            }
+            
+            logger.info(f"Uploading {len(file_data)} bytes to Slack storage...")
+            
+            upload_response = requests.post(upload_url, data=file_data, headers=upload_headers, timeout=120)
+            upload_response.raise_for_status()
+            
+            logger.info(f"✅ File uploaded successfully to Slack storage")
+            logger.info(f"Upload response status: {upload_response.status_code}")
+            
+            # Step 3: Complete the upload and share to channel
+            logger.info("STEP 3: Completing upload and sharing to channel")
+            
+            complete_endpoint = "https://slack.com/api/files.completeUploadExternal"
+            
+            complete_data = {
+                'files': json.dumps([{
+                    'id': file_id,
+                    'title': f"Wazuh Security Report - {report_date}"
+                }]),
+                'channel_id': self.slack_channel.lstrip('#'),  # Remove # if present
+                'initial_comment': f"📊 Daily security alert report generated from Wazuh\n📅 Report Date: {report_date}\n📁 File: {os.path.basename(filename)}\n⏰ Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            }
+            
+            complete_headers = {
+                'Authorization': f'Bearer {self.slack_token}',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+            
+            logger.info(f"Completing upload and sharing to channel: {self.slack_channel}")
+            logger.debug(f"Complete endpoint: {complete_endpoint}")
+            logger.debug(f"Complete data: {complete_data}")
+            
+            complete_response = requests.post(complete_endpoint, data=complete_data, headers=complete_headers, timeout=60)
+            complete_response.raise_for_status()
+            
+            result = complete_response.json()
+            logger.debug(f"Complete upload response: {result}")
+            
+            if result.get('ok'):
+                logger.info("=" * 60)
+                logger.info("✅ MODERN SLACK UPLOAD COMPLETED SUCCESSFULLY")
+                logger.info("=" * 60)
                 
-                logger.info(f"Slack API response status: {response.status_code}")
-                response.raise_for_status()
-
-                result = response.json()
-                logger.debug(f"Slack API response: {result}")
+                success_msg = f"File {os.path.basename(filename)} successfully sent to Slack channel {self.slack_channel}"
+                logger.info(f"Slack upload successful: {success_msg}")
                 
-                if result.get('ok'):
-                    success_msg = f"File {os.path.basename(filename)} successfully sent to Slack channel {self.slack_channel}"
-                    logger.info(f"Slack upload successful: {success_msg}")
-                    
-                    # Log additional success details
-                    if 'file' in result:
-                        file_info = result['file']
+                # Log additional success details
+                if 'files' in result:
+                    files_info = result['files']
+                    if files_info:
+                        file_info = files_info[0]  # Get first file info
                         logger.info(f"Uploaded file details:")
                         logger.info(f"  - File ID: {file_info.get('id', 'unknown')}")
-                        logger.info(f"  - File size: {file_info.get('size', 'unknown')} bytes")
-                        logger.info(f"  - File type: {file_info.get('filetype', 'unknown')}")
-                        logger.info(f"  - Upload timestamp: {file_info.get('timestamp', 'unknown')}")
-                    
-                    print(success_msg)
-                    return True
-                else:
-                    error_msg = result.get('error', 'Unknown error')
-                    logger.error(f"Slack API error: {error_msg}")
-                    logger.error(f"Full API response: {result}")
-                    
-                    # Enhanced error handling with specific troubleshooting
-                    if error_msg == 'invalid_auth':
+                        logger.info(f"  - File name: {file_info.get('name', 'unknown')}")
+                        logger.info(f"  - File title: {file_info.get('title', 'unknown')}")
+                        logger.info(f"  - Upload timestamp: {file_info.get('created', 'unknown')}")
+                
+                print(success_msg)
+                return True
+            else:
+                error_msg = result.get('error', 'Unknown error')
+                logger.error(f"Slack API error: {error_msg}")
+                logger.error(f"Full API response: {result}")
+                
+                # Enhanced error handling with specific troubleshooting
+                if error_msg == 'invalid_auth':
                         logger.error("Authentication failed - Invalid Slack bot token")
                         logger.error("Troubleshooting steps:")
                         logger.error("  1. Verify SLACK_BOT_TOKEN environment variable")
@@ -2567,44 +2640,66 @@ class WazuhReportAutomator:
                         logger.error("  4. Verify bot is installed in the workspace")
                         print("Hint: Check if your Slack bot token is valid and has the necessary permissions")
                         
-                    elif error_msg == 'channel_not_found':
-                        logger.error(f"Slack channel not found: {self.slack_channel}")
-                        logger.error("Troubleshooting steps:")
-                        logger.error("  1. Verify channel name is correct (include # for public channels)")
-                        logger.error("  2. Check if channel exists in the workspace")
-                        logger.error("  3. Ensure bot has access to the channel")
-                        logger.error("  4. For private channels, invite the bot to the channel")
-                        print(f"Hint: Check if the Slack channel '{self.slack_channel}' exists and the bot has access")
-                        
-                    elif error_msg == 'not_in_channel':
-                        logger.error(f"Bot is not a member of channel: {self.slack_channel}")
-                        logger.error("Troubleshooting steps:")
-                        logger.error("  1. Invite the bot to the channel")
-                        logger.error("  2. Use /invite @botname in the channel")
-                        logger.error("  3. For private channels, add bot as a member")
-                        print(f"Hint: Add the bot to the Slack channel '{self.slack_channel}'")
-                        
-                    elif error_msg == 'file_uploads_disabled':
-                        logger.error("File uploads are disabled for this workspace")
-                        logger.error("Contact workspace administrator to enable file uploads")
-                        print("Error: File uploads are disabled in this Slack workspace")
-                        
-                    elif error_msg == 'over_file_size_limit':
-                        logger.error(f"File size exceeds Slack limits: {file_size} bytes")
-                        logger.error("Consider compressing the file or splitting large reports")
-                        print("Error: File is too large for Slack upload")
-                        
-                    elif error_msg == 'rate_limited':
-                        logger.error("Slack API rate limit exceeded")
-                        logger.error("Wait before retrying or reduce API call frequency")
-                        print("Error: Slack API rate limit exceeded - try again later")
-                        
-                    else:
-                        logger.error(f"Unhandled Slack API error: {error_msg}")
-                        logger.error("Check Slack API documentation for error details")
-                        print(f"Error sending file to Slack: {error_msg}")
+                elif error_msg == 'channel_not_found':
+                    logger.error(f"Slack channel not found: {self.slack_channel}")
+                    logger.error("Troubleshooting steps:")
+                    logger.error("  1. Verify channel name is correct (include # for public channels)")
+                    logger.error("  2. Check if channel exists in the workspace")
+                    logger.error("  3. Ensure bot has access to the channel")
+                    logger.error("  4. For private channels, invite the bot to the channel")
+                    print(f"Hint: Check if the Slack channel '{self.slack_channel}' exists and the bot has access")
                     
-                    return False
+                elif error_msg == 'not_in_channel':
+                    logger.error(f"Bot is not a member of channel: {self.slack_channel}")
+                    logger.error("Troubleshooting steps:")
+                    logger.error("  1. Invite the bot to the channel")
+                    logger.error("  2. Use /invite @botname in the channel")
+                    logger.error("  3. For private channels, add bot as a member")
+                    print(f"Hint: Add the bot to the Slack channel '{self.slack_channel}'")
+                    
+                elif error_msg == 'file_uploads_disabled':
+                    logger.error("File uploads are disabled for this workspace")
+                    logger.error("Contact workspace administrator to enable file uploads")
+                    print("Error: File uploads are disabled in this Slack workspace")
+                    
+                elif error_msg == 'over_file_size_limit':
+                    logger.error(f"File size exceeds Slack limits: {file_size} bytes")
+                    logger.error("Consider compressing the file or splitting large reports")
+                    print("Error: File is too large for Slack upload")
+                    
+                elif error_msg == 'rate_limited':
+                    logger.error("Slack API rate limit exceeded")
+                    logger.error("Wait before retrying or reduce API call frequency")
+                    print("Error: Slack API rate limit exceeded - try again later")
+                    
+                elif error_msg == 'method_deprecated':
+                    logger.error("Slack files.upload method is deprecated")
+                    logger.error("This should not happen with the new upload method")
+                    logger.error("Check if the code is using the correct modern API endpoints")
+                    print("Error: Using deprecated Slack API method")
+                    
+                elif error_msg == 'file_not_found':
+                    logger.error("File not found during upload completion")
+                    logger.error("The file may have expired or been deleted from Slack storage")
+                    print("Error: File not found in Slack storage")
+                    
+                elif error_msg == 'invalid_file_id':
+                    logger.error("Invalid file ID provided to complete upload")
+                    logger.error("Check the file ID returned from getUploadURLExternal")
+                    print("Error: Invalid file ID for Slack upload")
+                    
+                elif error_msg == 'upload_url_expired':
+                    logger.error("Upload URL has expired")
+                    logger.error("Request a new upload URL and retry")
+                    print("Error: Slack upload URL expired")
+                    
+                else:
+                    logger.error(f"Unhandled Slack API error: {error_msg}")
+                    logger.error("Check Slack API documentation for error details")
+                    logger.error("Modern API endpoints: files.getUploadURLExternal + files.completeUploadExternal")
+                    print(f"Error sending file to Slack: {error_msg}")
+                
+                return False
 
         except requests.exceptions.HTTPError as e:
             logger.error(f"HTTP error during Slack upload: {e}")
@@ -2919,11 +3014,11 @@ class WazuhReportAutomator:
                 print("Daily report generation completed successfully")
                 return True
                 
-            elif self.test_mode:
-                logger.info("Test mode enabled - skipping Slack integration")
-                logger.info("STEP 3 SKIPPED: Test mode active")
+            elif self.test_mode and not self.enable_slack:
+                logger.info("Test mode enabled with Slack disabled - skipping Slack integration")
+                logger.info("STEP 3 SKIPPED: Test mode active with Slack disabled")
                 
-                print("🧪 [TEST MODE] Skipping Slack integration - test mode enabled")
+                print("🧪 [TEST MODE] Skipping Slack integration - Slack disabled in test mode")
                 print(f"🧪 [TEST MODE] CSV report saved to: {filename}")
                 
                 # Log final success
@@ -2937,25 +3032,49 @@ class WazuhReportAutomator:
                 print("🧪 [TEST MODE] Daily report generation completed successfully")
                 return True
             
-            # Send to Slack (only when enable_slack=True and not in test mode)
-            logger.info("Initiating Slack file upload process")
+            # Send to Slack (when enable_slack=True, regardless of test mode)
+            if self.test_mode:
+                logger.info("🧪 [TEST MODE] Initiating Slack file upload process with enhanced testing")
+                logger.info("🧪 [TEST MODE] Test mode Slack integration - enhanced logging enabled")
+                print("🧪 [TEST MODE] Testing Slack integration...")
+            else:
+                logger.info("Initiating Slack file upload process")
+            
             logger.info(f"Target Slack channel: {self.slack_channel}")
             logger.info(f"File to upload: {filename}")
+            logger.info(f"Test mode: {self.test_mode}")
+            logger.info(f"Slack enabled: {self.enable_slack}")
             
             if self.send_to_slack(filename):
-                logger.info("STEP 3 COMPLETED: Report successfully sent to Slack")
-                print("Report successfully sent to Slack")
+                if self.test_mode:
+                    logger.info("🧪 [TEST MODE] STEP 3 COMPLETED: Report successfully sent to Slack (TEST)")
+                    print("🧪 [TEST MODE] Report successfully sent to Slack - TEST PASSED!")
+                    print("🧪 [TEST MODE] Slack integration working correctly")
+                else:
+                    logger.info("STEP 3 COMPLETED: Report successfully sent to Slack")
+                    print("Report successfully sent to Slack")
                 
-                # Clean up file after successful Slack upload
-                logger.info("Initiating file cleanup after successful Slack upload")
-                self.cleanup_file(filename)
+                # Clean up file after successful Slack upload (but preserve in test mode)
+                if self.test_mode:
+                    logger.info("🧪 [TEST MODE] Preserving test file - skipping cleanup for analysis")
+                    print(f"🧪 [TEST MODE] Test file preserved at: {filename}")
+                else:
+                    logger.info("Initiating file cleanup after successful Slack upload")
+                    self.cleanup_file(filename)
                 
                 # Log final success
                 execution_time = datetime.datetime.now() - execution_start_time
                 logger.info("=" * 60)
-                logger.info("DAILY REPORT AUTOMATION COMPLETED SUCCESSFULLY")
+                if self.test_mode:
+                    logger.info("🧪 [TEST MODE] DAILY REPORT AUTOMATION COMPLETED SUCCESSFULLY")
+                    logger.info("🧪 [TEST MODE] Slack integration test PASSED")
+                else:
+                    logger.info("DAILY REPORT AUTOMATION COMPLETED SUCCESSFULLY")
                 logger.info(f"Total execution time: {execution_time}")
-                logger.info("File uploaded to Slack and cleaned up")
+                if self.test_mode:
+                    logger.info(f"Test file preserved: {filename}")
+                else:
+                    logger.info("File uploaded to Slack and cleaned up")
                 logger.info("=" * 60)
                 
                 return True
@@ -3035,14 +3154,52 @@ def interactive_configuration_collector():
         logger.info("PHASE 1: OPERATION MODE SELECTION")
         logger.info("Presenting user with comprehensive operation mode options")
         
-        print("\n📋 PHASE 1: OPERATION MODE SELECTION")
-        print("-" * 50)
-        print("Please select your desired operation mode:")
-        print("  [1] CSV Generation Only (No Slack integration)")
-        print("  [2] CSV + Slack Integration (Full automation)")
-        print("  [3] Test Mode - CSV Only (Enhanced logging)")
-        print("  [4] Test Mode - CSV + Slack (Full test suite)")
-        print("-" * 50)
+        print("\n📋 PHASE 1: COMPREHENSIVE OPERATION MODE SELECTION")
+        print("=" * 80)
+        print("Select your desired operation mode with detailed feature breakdown:")
+        print()
+        print("🔹 [1] CSV GENERATION ONLY - Minimal Configuration Mode")
+        print("    ├─ 📄 Generates CSV report files locally")
+        print("    ├─ 🚫 NO Slack integration or notifications")
+        print("    ├─ ⚡ Fastest execution - minimal overhead")
+        print("    ├─ 🔧 Requires: Wazuh + OpenSearch credentials only")
+        print("    ├─ 📁 Output: Local CSV files in specified directory")
+        print("    └─ 💡 Best for: Local analysis, data export, automation scripts")
+        print()
+        print("🔹 [2] CSV + SLACK INTEGRATION - Full Production Automation")
+        print("    ├─ 📄 Generates CSV report files locally")
+        print("    ├─ 📤 Automatically sends reports to Slack channel")
+        print("    ├─ 🔔 Real-time notifications and alerts")
+        print("    ├─ 🔧 Requires: Wazuh + OpenSearch + Slack Bot Token")
+        print("    ├─ 📁 Output: CSV files + Slack messages with attachments")
+        print("    ├─ 🧹 Auto-cleanup: Removes local files after Slack upload")
+        print("    └─ 💡 Best for: Team collaboration, automated reporting, SOC workflows")
+        print()
+        print("🔹 [3] TEST MODE - CSV ONLY - Development & Validation")
+        print("    ├─ 📄 Generates CSV report files with TEST prefix")
+        print("    ├─ 🚫 NO Slack integration (safe testing)")
+        print("    ├─ 📊 Enhanced logging and debugging information")
+        print("    ├─ 🔍 Detailed validation and error reporting")
+        print("    ├─ 🔧 Requires: Wazuh + OpenSearch credentials only")
+        print("    ├─ 📁 Output: TEST_*.csv files with comprehensive logs")
+        print("    └─ 💡 Best for: Development, testing, troubleshooting, validation")
+        print()
+        print("🔹 [4] TEST MODE - CSV + SLACK - Full Test Suite")
+        print("    ├─ 📄 Generates CSV report files with TEST prefix")
+        print("    ├─ 📤 Tests Slack integration with test messages")
+        print("    ├─ 🧪 Complete end-to-end testing pipeline")
+        print("    ├─ 📊 Maximum logging and debugging output")
+        print("    ├─ 🔧 Requires: Wazuh + OpenSearch + Slack Bot Token")
+        print("    ├─ 📁 Output: TEST_*.csv + Slack test messages")
+        print("    └─ 💡 Best for: Integration testing, deployment validation, QA")
+        print()
+        print("=" * 80)
+        print("💡 SELECTION GUIDE:")
+        print("   • First time setup? → Choose [3] Test Mode - CSV Only")
+        print("   • Production deployment? → Choose [2] CSV + Slack Integration")
+        print("   • Development/Testing? → Choose [3] or [4] based on Slack needs")
+        print("   • Quick data export? → Choose [1] CSV Generation Only")
+        print("=" * 80)
         
         while True:
             try:
@@ -3053,30 +3210,62 @@ def interactive_configuration_collector():
                 if mode_choice == '1':
                     config['test_mode'] = False
                     config['enable_slack'] = False
-                    mode_description = "Production CSV Generation Only"
+                    mode_description = "CSV Generation Only - Minimal Configuration"
                     logger.info(f"Operation mode selected: {mode_description}")
-                    print(f"✅ Selected: {mode_description}")
+                    logger.info("Mode configuration: Production=True, Slack=False")
+                    logger.info("Expected workflow: Wazuh → OpenSearch → CSV File → Complete")
+                    print(f"\n✅ SELECTED: {mode_description}")
+                    print("📋 Configuration Summary:")
+                    print("   • Production Mode: ✅ Active")
+                    print("   • Slack Integration: ❌ Disabled")
+                    print("   • Required Credentials: Wazuh + OpenSearch")
+                    print("   • Output: Local CSV files only")
+                    print("   • Cleanup: Manual (files remain on disk)")
                     break
                 elif mode_choice == '2':
                     config['test_mode'] = False
                     config['enable_slack'] = True
-                    mode_description = "Production CSV + Slack Integration"
+                    mode_description = "CSV + Slack Integration - Full Production Automation"
                     logger.info(f"Operation mode selected: {mode_description}")
-                    print(f"✅ Selected: {mode_description}")
+                    logger.info("Mode configuration: Production=True, Slack=True")
+                    logger.info("Expected workflow: Wazuh → OpenSearch → CSV File → Slack Upload → Cleanup")
+                    print(f"\n✅ SELECTED: {mode_description}")
+                    print("📋 Configuration Summary:")
+                    print("   • Production Mode: ✅ Active")
+                    print("   • Slack Integration: ✅ Enabled")
+                    print("   • Required Credentials: Wazuh + OpenSearch + Slack")
+                    print("   • Output: CSV files + Slack notifications")
+                    print("   • Cleanup: Automatic (files removed after Slack upload)")
                     break
                 elif mode_choice == '3':
                     config['test_mode'] = True
                     config['enable_slack'] = False
-                    mode_description = "Test Mode - CSV Only"
+                    mode_description = "Test Mode - CSV Only - Development & Validation"
                     logger.info(f"Operation mode selected: {mode_description}")
-                    print(f"✅ Selected: {mode_description}")
+                    logger.info("Mode configuration: Test=True, Slack=False")
+                    logger.info("Expected workflow: Wazuh → OpenSearch → TEST_CSV File → Enhanced Logging")
+                    print(f"\n✅ SELECTED: {mode_description}")
+                    print("📋 Configuration Summary:")
+                    print("   • Test Mode: 🧪 Active (Enhanced debugging)")
+                    print("   • Slack Integration: ❌ Disabled")
+                    print("   • Required Credentials: Wazuh + OpenSearch")
+                    print("   • Output: TEST_*.csv files with detailed logs")
+                    print("   • Cleanup: Manual (test files preserved)")
                     break
                 elif mode_choice == '4':
                     config['test_mode'] = True
                     config['enable_slack'] = True
-                    mode_description = "Test Mode - CSV + Slack"
+                    mode_description = "Test Mode - CSV + Slack - Full Test Suite"
                     logger.info(f"Operation mode selected: {mode_description}")
-                    print(f"✅ Selected: {mode_description}")
+                    logger.info("Mode configuration: Test=True, Slack=True")
+                    logger.info("Expected workflow: Wazuh → OpenSearch → TEST_CSV → Slack Test → Enhanced Logging")
+                    print(f"\n✅ SELECTED: {mode_description}")
+                    print("📋 Configuration Summary:")
+                    print("   • Test Mode: 🧪 Active (Maximum debugging)")
+                    print("   • Slack Integration: ✅ Enabled (Test messages)")
+                    print("   • Required Credentials: Wazuh + OpenSearch + Slack")
+                    print("   • Output: TEST_*.csv + Slack test notifications")
+                    print("   • Cleanup: Manual (test artifacts preserved)")
                     break
                 else:
                     logger.warning(f"Invalid mode selection received: '{mode_choice}'")
